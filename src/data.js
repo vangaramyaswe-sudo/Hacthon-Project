@@ -6,12 +6,15 @@ export const mapsUrl =
 
 export const eventDate = '5 January 2027';
 export const registrationDeadline = '31 December 2026';
+export const registrationDeadlineDate = '2026-12-31';
 export const baseRegistrationFee = 1000;
 export const earlyBirdDeadline = '20 December 2026';
+export const earlyBirdDeadlineDate = '2026-12-20';
+export const earlyBirdDiscountRate = 0.1;
 export const chiefGuest = 'Thatipamula Vedant Kaushik';
 export const chiefGuestFather = 'Thatipamula RajaGopi';
 export const organiserName = 'Vangaramyaswe';
-export const organiserDesignation = 'Senior software Engineer';
+export const organiserDesignation = 'Senior software Engineer LTM';
 export const organiserEmail = 'vangaramyaswe@gmail.com';
 
 export const eventRules = [

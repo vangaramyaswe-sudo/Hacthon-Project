@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /registrations/{registrationId} {
+      allow read, write: if false;
+    }
+
+    match /registration_unique_keys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /feedback/{feedbackId} {
+      allow read, update, delete: if false;
+      allow create: if request.resource.data.keys().hasAll([
+          'experience',
+          'rating',
+          'registration',
+          'courses',
+          'food',
+          'organisation',
+          'liked',
+          'improvement',
+          'participateAgain',
+          'comments',
+          'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'experience',
+          'rating',
+          'registration',
+          'courses',
+          'food',
+          'organisation',
+          'liked',
+          'improvement',
+          'participateAgain',
+          'comments',
+          'createdAt'
+        ])
+        && request.resource.data.experience in ['Excellent', 'Good', 'Average', 'Poor']
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.registration in ['Excellent', 'Good', 'Average', 'Poor']
+        && request.resource.data.courses in ['Excellent', 'Good', 'Average', 'Poor']
+        && request.resource.data.food in ['Excellent', 'Good', 'Average', 'Poor', 'Not applicable']
+        && request.resource.data.organisation in ['Excellent', 'Good', 'Average', 'Poor']
+        && request.resource.data.participateAgain in ['Yes', 'Maybe', 'No']
+        && request.resource.data.liked is string
+        && request.resource.data.liked.size() <= 2000
+        && request.resource.data.improvement is string
+        && request.resource.data.improvement.size() <= 2000
+        && request.resource.data.comments is string
+        && request.resource.data.comments.size() <= 2000
+        && request.resource.data.createdAt is string
+        && request.resource.data.createdAt.size() <= 40;
+    }
+  }
+}

@@ -9,15 +9,17 @@ import {
   MessageSquare, HelpCircle, ClipboardList, Star,
 } from 'lucide-react';
 import {
-  collection, doc, getDocs, setDoc, updateDoc,
+  doc, setDoc,
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth, db, firebaseConfigured } from './firebase';
 import {
-  baseRegistrationFee, chiefGuest, chiefGuestFather, earlyBirdDeadline, eventAddress, eventDate,
-  faqs, initialCourses, initialStations, mapsUrl, organiserDesignation, organiserEmail as organiserEmailAddress,
-  organiserName, registrationDeadline,
+  baseRegistrationFee, chiefGuest, chiefGuestFather, earlyBirdDeadline, earlyBirdDiscountRate,
+  earlyBirdDeadlineDate, eventAddress, eventDate, faqs, initialCourses, initialStations, mapsUrl,
+  organiserDesignation, organiserEmail as organiserEmailAddress, organiserName, registrationDeadline,
+  registrationDeadlineDate,
 } from './data';
+import DocumentUpload from './DocumentUpload';
 import './App.css';
 
 const iconMap = {
@@ -34,13 +36,27 @@ const readLocal = (key, fallback) => {
   }
 };
 
-const todayAtLoad = new Date();
+async function apiRequest(url, options = {}, token = null) {
+  const { headers: providedHeaders, ...requestOptions } = options;
+  const headers = new Headers(providedHeaders || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(url, { ...requestOptions, headers });
+  const payload = response.status === 204 ? {} : await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (HTTP ${response.status}).`);
+  }
+  return payload;
+}
+
+const todayAtLoad = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+}).format(new Date());
 
 function Header() {
   const [open, setOpen] = useState(false);
   const nav = [
     ['Home', '/'], ['Register', '/register'], ['Courses', '/courses'],
-    ['Event Details', '/event-details'], ['Location', '/location'],
+    ['Documents', '/documents'], ['Event Details', '/event-details'], ['Location', '/location'],
     ['Stations', '/stations'], ['Feedback', '/feedback'],
   ];
   return (
@@ -185,7 +201,7 @@ function EventDetails() {
 }
 
 function DiscountSection() {
-  const eligible = todayAtLoad <= new Date('2026-12-20T23:59:59');
+  const eligible = todayAtLoad <= earlyBirdDeadlineDate;
   return (
     <section className="discount-section">
       <div className="discount-icon"><CircleDollarSign /></div>
@@ -202,16 +218,10 @@ function Registration() {
   const [submitted, setSubmitted] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [baseFee] = useState(() => {
-    const settings = readLocal('eventSettings', { fee: baseRegistrationFee });
-    return settings.fee ?? baseRegistrationFee;
-  });
-  const today = todayAtLoad;
-  const registrationClosed = today > new Date('2026-12-31T23:59:59');
-  const discountEligible = today <= new Date('2026-12-20T23:59:59') && !registrationClosed;
-  const feeNumber = Number(baseFee);
-  const hasFee = Number.isFinite(feeNumber) && feeNumber > 0;
-  const discount = discountEligible && hasFee ? feeNumber * 0.1 : 0;
+  const registrationClosed = todayAtLoad > registrationDeadlineDate;
+  const discountEligible = todayAtLoad <= earlyBirdDeadlineDate && !registrationClosed;
+  const feeNumber = baseRegistrationFee;
+  const discount = discountEligible ? Math.round(feeNumber * earlyBirdDiscountRate) : 0;
   const formatRupees = (amount) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
 
   useEffect(() => {
@@ -241,18 +251,8 @@ function Registration() {
     if (!/^\+?[0-9\s-]{10,15}$/.test(mobile)) return setError('Enter a valid mobile number with 10 to 15 digits.');
     if (!form.get('consent')) return setError('You must accept the event rules and privacy notice.');
 
-    const existing = readLocal('registrations', []);
-    if (existing.some((item) => item.leaderEmail.toLowerCase() === email.toLowerCase())) {
-      return setError('This team leader email has already been registered.');
-    }
-    if (existing.some((item) => item.teamName.toLowerCase() === form.get('teamName').trim().toLowerCase())) {
-      return setError('This team name has already been used.');
-    }
-
     setLoading(true);
-    const confirmation = `HRE-${new Date().getFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    const record = {
-      id: confirmation,
+    const registration = {
       teamName: form.get('teamName').trim(),
       leaderName: form.get('leaderName').trim(),
       leaderEmail: email,
@@ -263,20 +263,15 @@ function Registration() {
       members,
       food: form.get('food')?.trim() || 'No requirements provided',
       accessibility: form.get('accessibility')?.trim() || 'No requirements provided',
-      registrationDate: new Date().toISOString(),
-      discountEligible,
-      baseFee: feeNumber,
-      discountAmount: discount,
-      finalFee: feeNumber - discount,
-      attended: false,
+      consent: form.get('consent') === 'on',
     };
     try {
-      const localRegistrations = [...existing, record];
-      localStorage.setItem('registrations', JSON.stringify(localRegistrations));
-      if (firebaseConfigured) {
-        await setDoc(doc(db, 'registrations', confirmation), record);
-      }
-      setSubmitted(record);
+      const result = await apiRequest('/api/registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registration),
+      });
+      setSubmitted(result.registration);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (saveError) {
       setError(`Registration could not be saved: ${saveError.message}`);
@@ -294,11 +289,12 @@ function Registration() {
         <p>Your unique registration ID:</p>
         <strong className="registration-id">{submitted.id}</strong>
         <p>Registration fee: <strong>{`₹${Math.round(submitted.finalFee).toLocaleString('en-IN')}`}</strong></p>
+        <p>Payment status: <strong>{submitted.paymentStatus === 'unpaid' ? 'Unpaid' : submitted.paymentStatus}</strong></p>
         <div className="confirmation-actions">
           <button className="button primary" onClick={() => window.print()}>Print confirmation</button>
           <button className="button ghost" onClick={() => setSubmitted(null)}>Register another team</button>
         </div>
-        <small>Data is saved in this browser; Firebase can provide shared cloud storage when configured.</small>
+        <small>Your registration has been saved. Payment is not marked complete until it is verified.</small>
       </section>
     );
   }
@@ -311,9 +307,7 @@ function Registration() {
         <p>Complete the details below. Registration closes on <strong>{registrationDeadline}</strong>. Event date: <strong>{eventDate}</strong>.</p>
         <div className="fee-box">
           <span>Registration fee</span>
-          {hasFee
-            ? <strong>{discountEligible ? `${formatRupees(feeNumber - discount)} after 10% discount` : formatRupees(feeNumber)}</strong>
-            : <strong>Registration fee will be announced soon</strong>}
+          <strong>{discountEligible ? `${formatRupees(feeNumber - discount)} after 10% discount` : formatRupees(feeNumber)}</strong>
         </div>
       </div>
       <form className="registration-form" onSubmit={submit}>
@@ -633,10 +627,10 @@ function Admin() {
   const [password, setPassword] = useState('');
   const [user, setUser] = useState(null);
   const [error, setError] = useState('');
-  const [registrations, setRegistrations] = useState(() => readLocal('registrations', []));
+  const [registrations, setRegistrations] = useState([]);
   const [feedback, setFeedback] = useState(() => readLocal('feedback', []));
   const [search, setSearch] = useState('');
-  const [fee, setFee] = useState(() => readLocal('eventSettings', { fee: baseRegistrationFee }).fee ?? baseRegistrationFee);
+  const [attendanceLoadingId, setAttendanceLoadingId] = useState(null);
   const [eventDateSetting, setEventDateSetting] = useState(() =>
     readLocal('eventSettings', { eventDate: '2027-01-05' }).eventDate ?? '2027-01-05');
   const [registrationDeadlineSetting, setRegistrationDeadlineSetting] = useState(() =>
@@ -653,11 +647,14 @@ function Admin() {
     }
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
+      const token = await result.user.getIdToken();
+      const [registrationResult, feedbackResult] = await Promise.all([
+        apiRequest('/api/registrations', {}, token),
+        apiRequest('/api/feedback', {}, token),
+      ]);
+      setRegistrations(registrationResult.registrations);
+      setFeedback(feedbackResult.feedback);
       setUser(result.user);
-      const snapshot = await getDocs(collection(db, 'registrations'));
-      setRegistrations(snapshot.docs.map((item) => item.data()));
-      const feedbackSnapshot = await getDocs(collection(db, 'feedback'));
-      setFeedback(feedbackSnapshot.docs.map((item) => item.data()));
     } catch (loginError) {
       setError(loginError.code === 'auth/invalid-credential'
         ? 'The email or password is incorrect.'
@@ -676,7 +673,6 @@ function Admin() {
       return;
     }
     const settings = {
-      fee: fee === '' ? baseRegistrationFee : Number(fee),
       eventDate: eventDateSetting,
       registrationDeadline: registrationDeadlineSetting,
       organiserEmail,
@@ -686,10 +682,26 @@ function Admin() {
   };
 
   const toggleAttendance = async (record) => {
-    const updated = registrations.map((item) => item.id === record.id ? { ...item, attended: !item.attended } : item);
-    setRegistrations(updated);
-    localStorage.setItem('registrations', JSON.stringify(updated));
-    if (firebaseConfigured) await updateDoc(doc(db, 'registrations', record.id), { attended: !record.attended });
+    setError('');
+    setAttendanceLoadingId(record.id);
+    try {
+      const token = await user.getIdToken();
+      const result = await apiRequest(
+        `/api/registrations/${encodeURIComponent(record.id)}/attendance`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attended: !record.attended }),
+        },
+        token,
+      );
+      setRegistrations((previous) => previous.map((item) =>
+        item.id === result.registration.id ? result.registration : item));
+    } catch (attendanceError) {
+      setError(attendanceError.message);
+    } finally {
+      setAttendanceLoadingId(null);
+    }
   };
 
   const exportCsv = () => {
@@ -737,6 +749,7 @@ function Admin() {
         <div><span>Organiser dashboard</span><h1>Event overview</h1></div>
         <button className="button ghost" onClick={logout}><LogOut size={17} /> Log out</button>
       </div>
+      {error && <div className="form-alert error" role="alert">{error}</div>}
       <div className="stat-grid">
         <article><Users /><span>Total registrations</span><strong>{registrations.length}</strong></article>
         <article><Check /><span>Attendees marked</span><strong>{attendedCount}</strong></article>
@@ -748,7 +761,7 @@ function Admin() {
         <button className="button primary" onClick={exportCsv}>Export CSV</button>
       </div>
       <div className="settings-grid">
-        <label>Base registration fee<input type="number" min="0" step="0.01" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="Organiser to announce" /></label>
+        <label>Confirmed base registration fee<input type="number" value={baseRegistrationFee} disabled /></label>
         <label>Confirmed event date<input type="date" value={eventDateSetting} onChange={(e) => setEventDateSetting(e.target.value)} /></label>
         <label>Registration deadline<input type="date" value={registrationDeadlineSetting} onChange={(e) => setRegistrationDeadlineSetting(e.target.value)} /></label>
         <label>Organiser contact email<input type="email" value={organiserEmail} onChange={(e) => setOrganiserEmail(e.target.value)} placeholder="Leave blank until configured" /></label>
@@ -763,7 +776,11 @@ function Admin() {
                 <td>{item.id}</td><td>{item.teamName}</td><td>{item.leaderName}<small>{item.leaderEmail}</small></td><td>{item.course}</td>
                 <td>{new Date(item.registrationDate).toLocaleDateString()}</td><td>{item.discountEligible ? '10% eligible' : 'No discount'}</td>
                 <td>{item.members?.map((member) => <small key={member.name}>{member.name} - {member.age} yrs</small>)}</td>
-                <td><button className={item.attended ? 'attendance on' : 'attendance'} onClick={() => toggleAttendance(item)}>{item.attended ? 'Attended' : 'Mark attended'}</button></td>
+                <td><button
+                  className={item.attended ? 'attendance on' : 'attendance'}
+                  onClick={() => toggleAttendance(item)}
+                  disabled={attendanceLoadingId === item.id}
+                >{attendanceLoadingId === item.id ? 'Saving...' : item.attended ? 'Attended' : 'Mark attended'}</button></td>
               </tr>
             ))}
           </tbody>
@@ -795,6 +812,7 @@ function AppRoutes() {
       <Route path="/" element={<Home />} />
       <Route path="/event-details" element={<SiteShell><EventDetails /><DiscountSection /></SiteShell>} />
       <Route path="/register" element={<SiteShell><Registration /></SiteShell>} />
+      <Route path="/documents" element={<SiteShell><DocumentUpload /></SiteShell>} />
       <Route path="/location" element={<SiteShell><LocationSection /></SiteShell>} />
       <Route path="/feedback" element={<SiteShell><Feedback /></SiteShell>} />
       <Route path="/faq" element={<SiteShell><FAQPage /></SiteShell>} />
