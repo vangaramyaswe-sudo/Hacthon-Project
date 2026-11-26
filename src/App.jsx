@@ -20,6 +20,7 @@ import {
   registrationDeadlineDate,
 } from './data';
 import DocumentUpload from './DocumentUpload';
+import FloatingChatbot from './FloatingChatbot';
 import './App.css';
 
 const iconMap = {
@@ -829,7 +830,10 @@ function AppRoutes() {
 function App() {
   return (
     <HashRouter>
-      <AppRoutes />
+      <>
+        <AppRoutes />
+        <FloatingChatbot />
+      </>
     </HashRouter>
   );
 }

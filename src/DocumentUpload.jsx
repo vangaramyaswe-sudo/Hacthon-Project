@@ -1,17 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpFromLine, FileText, MessageSquare, RefreshCw, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt'];
 
 async function requestJson(url, options) {
-  const response = await fetch(url, options);
-  const result = response.status === 204 ? {} : await response.json();
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch {
+    throw new Error('Could not connect to the document service. Make sure the project server is running.');
+  }
+
+  let result;
+  try {
+    result = response.status === 204 ? {} : await response.json();
+  } catch {
+    if (!response.ok) {
+      throw new Error('Could not connect to the document service. Make sure the project server is running.');
+    }
+    throw new Error('The document service returned an unreadable response.');
+  }
   if (!response.ok) throw new Error(result.error || `Request failed (HTTP ${response.status}).`);
   return result;
 }
 
-function DocumentUpload() {
+function DocumentUpload({ chatOnly = false }) {
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState('uploading');
@@ -234,16 +249,19 @@ function DocumentUpload() {
 
   const readyDocuments = documents.filter((document) => document.status === 'ready');
   const selectedCount = (selectedIds || []).length;
+  const questionId = chatOnly ? 'floating-document-question' : 'document-question';
 
   return (
-    <section className="section document-upload">
-      <div className="page-heading">
-        <span>Private local document workspace</span>
-        <h1>Ask your documents</h1>
-        <p>Upload a PDF, DOCX, or TXT file, wait for processing, then ask questions using its contents.</p>
-      </div>
+    <section className={chatOnly ? 'floating-document-chat-content' : 'section document-upload'}>
+      {!chatOnly && (
+        <>
+          <div className="page-heading">
+            <span>Private local document workspace</span>
+            <h1>Ask your documents</h1>
+            <p>Upload a PDF, DOCX, or TXT file, wait for processing, then ask questions using its contents.</p>
+          </div>
 
-      <form className="document-upload-card" onSubmit={uploadFile}>
+          <form className="document-upload-card" onSubmit={uploadFile}>
         <label className="document-file-picker">
           <FileText size={30} aria-hidden="true" />
           <span>{file ? file.name : 'Choose a document from your device'}</span>
@@ -296,9 +314,9 @@ function DocumentUpload() {
           <ArrowUpFromLine size={17} />
           {uploading ? 'Processing document...' : 'Upload and process'}
         </button>
-      </form>
+          </form>
 
-      <div className="document-library">
+          <div className="document-library">
         <div className="document-library-heading">
           <div><span className="eyebrow">Local library</span><h2>Your documents</h2></div>
           <button
@@ -364,16 +382,44 @@ function DocumentUpload() {
             </div>
           </>
         )}
-      </div>
+          </div>
+        </>
+      )}
 
-      <div className="document-chat">
+      <div className={chatOnly ? 'document-chat floating-document-chat' : 'document-chat'}>
         <div className="document-library-heading">
           <div><span className="eyebrow">Grounded answers</span><h2>Chat with your documents</h2></div>
           <MessageSquare className="chat-heading-icon" />
         </div>
+        {documentsError && chatOnly && <p className="form-alert error" role="alert">{documentsError}</p>}
         {readyDocuments.length === 0
-          ? <p className="document-muted">A document must finish processing before you can ask questions.</p>
+          ? (
+            <div className="document-muted">
+              <p>{documentsLoading
+                ? 'Checking for processed documents...'
+                : 'A processed document is needed before you can ask questions.'}</p>
+              {!documentsLoading && !documentsError && <Link to="/documents">Upload a document</Link>}
+            </div>
+          )
           : <p className="document-muted">Only the ready documents selected above will be searched.</p>}
+
+        {chatOnly && readyDocuments.length > 0 && (
+          <details className="floating-chat-document-picker">
+            <summary>{selectedCount} ready document{selectedCount === 1 ? '' : 's'} selected</summary>
+            <div>
+              {readyDocuments.map((document) => (
+                <label key={document.document_id}>
+                  <input
+                    type="checkbox"
+                    checked={(selectedIds || []).includes(document.document_id)}
+                    onChange={() => toggleDocument(document.document_id)}
+                  />
+                  <span>{document.filename}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
 
         <div className="conversation" aria-live="polite">
           {conversation.map((turn, index) => (
@@ -401,16 +447,16 @@ function DocumentUpload() {
         </div>
         {chatError && <div className="form-alert error" role="alert">{chatError}</div>}
         <form className="chat-form" onSubmit={submitQuestion}>
-          <label htmlFor="document-question">Your question</label>
+          <label htmlFor={questionId}>Your question</label>
           <textarea
-            id="document-question"
+            id={questionId}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder="Ask a question answered by your selected documents..."
             maxLength={2000}
             required
           />
-          <button className="button primary" type="submit" disabled={chatLoading || readyDocuments.length === 0 || !selectedCount}>
+          <button className="button primary" type="submit" disabled={chatLoading || documentsLoading || readyDocuments.length === 0 || !selectedCount}>
             {chatLoading ? 'Searching...' : 'Ask question'}
           </button>
         </form>
