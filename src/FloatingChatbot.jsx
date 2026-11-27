@@ -1,13 +1,9 @@
 import { useState } from 'react';
 import { Bot, MessageCircle, X } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
 import DocumentUpload from './DocumentUpload';
 
 function FloatingChatbot() {
-  const location = useLocation();
   const [open, setOpen] = useState(false);
-
-  if (location.pathname === '/documents') return null;
 
   return (
     <aside className="floating-chatbot">
